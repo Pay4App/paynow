@@ -1,0 +1,21 @@
+{
+    "name": "ihatehandles/paynow",
+    "description": "PHP SDK for Paynow",
+    "type": "library",
+    "require": {
+        "rmccue/requests": "^1.6"
+    },
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Sam",
+            "email": "sam.takunda@gmail.com"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Paynow\\": "src/"
+        }
+    },
+    "minimum-stability": "dev"
+}

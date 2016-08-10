@@ -1,0 +1,11 @@
+/vendor
+composer.phar
+.DS_Store
+Thumbs.db
+.env
+.phpstorm.meta.php
+/.idea
+_ide_helper.php
+htpasswd
+sublime.sublime-workspace
+sublime.sublime-project
