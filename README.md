@@ -16,14 +16,14 @@ require 'vendor/autoload.php';
 $p = new Paynow\Paynow(0000, 'abcdef');
 
 $reference = '123';
-$totalCost = 10.00;
+$amount = 10.00;
 $additionalInfo = 'Payment for order '.$reference;
 $returnUrl = 'http://example.com/thankyou';
 $resultUrl = 'http://example.com/result';
 
 $res = $p->initiatePayment(
 	$reference,
-	$totalCost,
+	$amount,
 	$additionalInfo,
 	$returnUrl,
 	$resultUrl
