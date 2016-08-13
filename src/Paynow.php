@@ -4,60 +4,74 @@ namespace Paynow;
 
 use \Requests;
 
+use Paynow\CreateFailedException;
+use Paynow\UpdateProcessingException;
+
 class Paynow {
 
+    /**
+     * Merchant's Paynow integration Id
+     *
+     * @var int
+     */
 	private $integrationId;
-	private $integrationKey;
-
-	private function __construct($integrationId, $integrationKey)
-	{
-
-	}
 
 	/**
-	 * Checks if the 'hash' in payload is what we expect
+     * Merchant's Paynow integration key
+     *
+     * @var string
+     */
+	private $integrationKey;
+
+	/**
+     * Generic store for extended error messages
+     *
+     * @var mixed
+     */
+	private $error;
+
+	/**
+	 * Create a new Paynow instance
 	 *
-	 * @param $payload Array of key => values
-	 * @return bool
+	 * @param 	int 		$integrationId Paynow integration Id
+	 * @param 	string 		$integrationKey Paynow integration key
+	 * @return 	void
 	 */
-	public function verifyPayNowHash($payload)
+	public function __construct($integrationId, $integrationKey)
 	{
-		$hashString = '';
-
-		foreach ($payload as $key => $value) {
-			if($key == 'hash') continue;
-			$hashString .= $value;
-		}
-
-		$hashString .= $this->integrationKey;
-		$hashString = strtoupper(hash('sha512', $hashString));
-		return ($hashString === $payload['hash']);
+		$this->integrationId = $integrationId;
+		$this->integrationKey = $integrationKey;
 	}
 
 	/**
 	 * Initiates a checkout with Paynow and returns the browserurl and pollurl in an object
 	 *
-	 * @throws PayNowException
-	 * @throws PayNowException
-	 * @throws PayNowException
-	 * @throws PayNowException
-	 * @throws PayNowException
-	 * @throws PayNowException
-	 * @return object
+	 * @param 	mixed 	$reference 			Transaction reference
+	 * @param 	float 	$amount 	 		Amount
+	 * @param 	string 	$additionalInfo 	Additional info
+	 * @param 	string 	$returnUrl 			Return URL
+	 * @param 	string 	$resultUrl 			Result URL
+	 * @param 	string 	$authEmail 			(Optional) Auth email to use
+	 *
+	 * @throws 	Paynow\CreateFailedException
+	 *
+	 * @return 	Object
 	 */
-	public function initiatePayment($reference, $totalCost, $returnUrl, $resultUrl, $authEmail = null)
+	public function initiatePayment($reference, $amount, $additionalInfo, $returnUrl, $resultUrl, $authEmail = null)
 	{		
 		//prepare Paynow request
 		$parameters = array (
 			'id' 		=> $this->integrationId,
-			'reference' => $this->mOrderInfo['order_id'],
-			'amount' 	=> $totalCost,
-			//'additionalinfo' => '',
+			'reference' => $reference,
+			'amount' 	=> $amount,
+			'additionalinfo' => $additionalInfo,
 			'returnurl' => $returnUrl,
 			'resulturl' => $resultUrl,
-			'authemail' => $authemail,
 			'status'	=> 'Message',
+			'hash'		=> '',
 		);
+
+		if ($authEmail) $parameters['authemail'] = $authEmail;
 
 		foreach ($parameters as $key => $value) {
 			$parameters['hash'] .= $value;
@@ -86,10 +100,9 @@ class Paynow {
 		if (!array_key_exists('status', $response))
 			$this->createFailed('Cannot find Paynow status', $response);
 
-		if ($response['status'] === "error") $this->createFailed($response['error']);
+		if ($response['status'] === "Error") $this->createFailed($response['error']);
 
-		if (!$response['status'] !== 'ok')
-			$this->createFailed('Unknown Paynow status: '.$response['status']);
+		if ($response['status'] !== 'Ok') $this->createFailed('Unknown Paynow status: '.$response['status']);
 
 		//Check if all the other needed keys are there
 		if (!array_key_exists('browserurl', $response)) 
@@ -112,13 +125,16 @@ class Paynow {
 	}
 
 	/**
-	 * @param array $payload Usually the contents of $_POST
-	 * @return null
+	 * Checks if a status update has a valid hash, and confirms it with Paynow via a poll
+	 * 
+	 *
+	 * @param 	array 	$payload 	Details of the status update (Usually the contents of $_POST)
+	 * @param 	string 	$pollUrl 	(Optional) The URL to use for the poll we use for confirmation.
+	 *	 							Method will use the pollurl in $payload if none is provided.							
+	 * @return 	null
 	 */
-	public function processStatusUpdate($payload, $handleExit = false, $pollUrl = null)
+	public function processStatusUpdate($payload, $pollUrl = null)
 	{		
-		$this->handleExit = $handleExit;
-
 		if(
 			!array_key_exists('reference', $payload) ||
 			!array_key_exists('amount', $payload) ||
@@ -128,14 +144,15 @@ class Paynow {
 			!array_key_exists('hash', $payload)
 		) $this->updateProcessingFailed('Missing required fields', $payload);
 
-		if (!$this->verifyHash($payload)) $this->updateProcessingFailed('Hash verification failed', $payload);
+		if (!$this->verifyHash($payload))
+			$this->updateProcessingFailed('Hash verification failed', $payload);
 
 		//Use payload's pollurl if none is provided
-		if (!$pollUrl) $pollUrl = $payload['pollUrl'];
+		if (!$pollUrl) $pollUrl = $payload['pollurl'];
 
 		try
 		{
-			$res = Requests::post($pollurl, array(), array());			
+			$res = Requests::post($pollUrl, array(), array());
 
 		}
 		catch(Exception $e)
@@ -154,9 +171,71 @@ class Paynow {
 			array_key_exists('pollurl', $response) &
 			array_key_exists('status', $response) &
 			array_key_exists('hash', $payload)
-		)) $this->updateProcessingFailed('Missing required parameters');
+		)) $this->updateProcessingFailed('Paynow response missing expected parameters');
 
-		return true;
+		//Compare if the posted transaction matches the one we fetched
+		$detailsMatch = ($payload === $response);
+
+		if (!$detailsMatch)	$this->updateProcessingFailed('Posted transaction is different from polled transaction');
+
+		return (object)array(
+			'reference' => $payload['reference'],
+			'amount' => $payload['amount'],
+			'paynowreference' => $payload['paynowreference'],
+			'pollurl' => $payload['pollurl'],
+			'status' => $payload['status'],
+			'hash' => $payload['hash'],
+		);
+
+	}
+
+	/**
+	 * Checks if the 'hash' in payload is what we expect
+	 *
+	 * @param $payload Array of key => values
+	 *
+	 * @return bool
+	 */
+	public function verifyHash($payload)
+	{
+		$hashString = '';
+
+		foreach ($payload as $key => $value) {
+			if($key === 'hash') continue;
+			$hashString .= $value;
+		}
+
+		$hashString .= $this->integrationKey;
+		$hashString = strtoupper(hash('sha512', $hashString));
+		return ($hashString === $payload['hash']);
+	}
+
+	/**
+	 * Throw a CreateFailedException with $message
+	 * 
+	 * @param string $message 	Exception message
+	 * @param mixed  $errorData (Optional) Additional error information, saved to $this->error
+	 *
+	 * @return void
+	 */
+	private function createFailed($message, $errorData = null)
+	{
+		$this->error = $errorData;
+		throw new CreateFailedException($message, 1);
+	}
+
+	/**
+	 * Throw an UpdateProcessingException with $message
+	 * 
+	 * @param string $message 	Exception message
+	 * @param mixed  $errorData (Optional) Additional error information, saved to $this->error
+	 *
+	 * @return void
+	 */
+	private function updateProcessingFailed($message, $errorData = null)
+	{
+		$this->error = $errorData;
+		throw new UpdateProcessingException($message, 1);
 	}
 
 }

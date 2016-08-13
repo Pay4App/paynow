@@ -2,4 +2,4 @@
 
 ----
 
-An effort to generalize operations. Not ready for *any* use.
+Docs soon
