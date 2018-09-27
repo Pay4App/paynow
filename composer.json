@@ -3,7 +3,7 @@
     "description": "PHP SDK for Paynow",
     "type": "library",
     "require": {
-        "rmccue/requests": "^1.6"
+        "rmccue/requests": "^1.7.0"
     },
     "license": "MIT",
     "authors": [
